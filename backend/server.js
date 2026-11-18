@@ -169,9 +169,9 @@ app.use((err, req, res, next) => {
     });
 });
 
-// Server (only start listening when run directly, not in serverless environments like Vercel)
+// Server (listen when started directly via node server.js, npm start, or Vercel express service)
 let server = null;
-if (!process.env.VERCEL && require.main === module) {
+if (require.main === module) {
     const PORT = parseInt(process.env.PORT || "5000", 10);
     server = app.listen(PORT, "0.0.0.0", () => {
         console.log(`GetItResolved Backend running on http://localhost:${PORT}`);
