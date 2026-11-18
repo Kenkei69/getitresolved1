@@ -148,42 +148,10 @@ app.post("/api/feedback", submitFeedback);
 
 // Test API - Health check
 app.get("/api/health", (req, res) => {
-    let directClientResult = "not_attempted";
-    try {
-        const { createClient } = require("@supabase/supabase-js");
-        if (process.env.SUPABASE_URL && process.env.SUPABASE_SECRET_KEY) {
-            const client = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SECRET_KEY);
-            directClientResult = {
-                type: typeof client,
-                hasFrom: typeof (client && client.from),
-                ctor: client && client.constructor ? client.constructor.name : null
-            };
-        } else {
-            directClientResult = "env_missing";
-        }
-    } catch (e) {
-        directClientResult = { error: e.message };
-    }
-
     res.status(200).json({
         success: true,
         message: "GetItResolved Backend is Running!",
-        supabaseInfo: {
-            type: typeof supabase,
-            hasFrom: typeof (supabase && supabase.from),
-            keys: supabase ? Object.keys(supabase) : [],
-            ctor: supabase && supabase.constructor ? supabase.constructor.name : null,
-            ownProps: supabase ? Object.getOwnPropertyNames(supabase) : [],
-            protoProps: (supabase && Object.getPrototypeOf(supabase)) ? Object.getOwnPropertyNames(Object.getPrototypeOf(supabase)) : [],
-            rawType: typeof rawSupabase,
-            rawCtor: rawSupabase && rawSupabase.constructor ? rawSupabase.constructor.name : null,
-            rawOwnProps: rawSupabase ? Object.getOwnPropertyNames(rawSupabase) : []
-        },
-        envCheck: {
-            hasSupabaseUrl: Boolean(process.env.SUPABASE_URL),
-            hasSupabaseSecret: Boolean(process.env.SUPABASE_SECRET_KEY),
-            directClientResult
-        }
+        database: typeof (supabase && supabase.from) === "function" ? "connected" : "disconnected"
     });
 });
 
