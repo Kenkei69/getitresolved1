@@ -150,7 +150,14 @@ app.post("/api/feedback", submitFeedback);
 app.get("/api/health", (req, res) => {
     res.status(200).json({
         success: true,
-        message: "GetItResolved Backend is Running!"
+        message: "GetItResolved Backend is Running!",
+        supabaseInfo: {
+            type: typeof supabase,
+            hasFrom: typeof (supabase && supabase.from),
+            keys: supabase ? Object.keys(supabase) : [],
+            rawType: typeof rawSupabase,
+            rawKeys: rawSupabase ? Object.keys(rawSupabase) : []
+        }
     });
 });
 
