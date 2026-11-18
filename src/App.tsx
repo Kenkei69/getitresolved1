@@ -47,7 +47,18 @@ interface BackendComplaint {
   updated_at?: string;
 }
 
-const API_BASE_URL = (import.meta.env.VITE_API_URL || '/api').replace(/\/+$/, '');
+const getApiBaseUrl = (): string => {
+  const envUrl = import.meta.env.VITE_API_URL;
+  if (envUrl) {
+    if (typeof window !== 'undefined' && window.location.protocol === 'https:' && envUrl.includes('localhost')) {
+      return '/api';
+    }
+    return envUrl.replace(/\/+$/, '');
+  }
+  return '/api';
+};
+
+const API_BASE_URL = getApiBaseUrl();
 
 const evaluateAiMetrics = (title: string, desc: string, deptInput?: string) => {
   const text = `${title} ${desc}`.toLowerCase();

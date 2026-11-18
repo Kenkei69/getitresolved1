@@ -26,6 +26,7 @@ app.use(helmet({
 
 // 2. CORS configuration with explicit allowlist and dev flexibility
 const defaultAllowedOrigins = [
+    "https://getitresolved1-sus2.vercel.app",
     "http://localhost:5173",
     "http://127.0.0.1:5173",
     "http://localhost:5000",
@@ -34,44 +35,83 @@ const defaultAllowedOrigins = [
     "http://127.0.0.1:3000"
 ];
 
-const envAllowedOrigins = process.env.ALLOWED_ORIGINS
-    ? process.env.ALLOWED_ORIGINS.split(",").map((o) => o.trim()).filter(Boolean)
-    : (process.env.FRONTEND_URL ? [process.env.FRONTEND_URL.trim()] : []);
+const envAllowedOrigins = [
+    ...(process.env.ALLOWED_ORIGINS ? process.env.ALLOWED_ORIGINS.split(",").map((o) => o.trim()).filter(Boolean) : []),
+    ...(process.env.FRONTEND_URL ? [process.env.FRONTEND_URL.trim()] : []),
+    ...(process.env.VERCEL_URL ? [`https://${process.env.VERCEL_URL.trim().replace(/^https?:\/\//, "")}`] : []),
+    ...(process.env.VERCEL_PROJECT_PRODUCTION_URL ? [`https://${process.env.VERCEL_PROJECT_PRODUCTION_URL.trim().replace(/^https?:\/\//, "")}`] : [])
+];
 
 const allowedOrigins = Array.from(new Set([...defaultAllowedOrigins, ...envAllowedOrigins]));
 
-const corsOptions = {
-    origin: (origin, callback) => {
-        // Allow requests with no origin (e.g. mobile apps, curl, server-to-server, Postman)
-        if (!origin) return callback(null, true);
-        // Allow any localhost / 127.0.0.1 origin during development or testing
-        if (/^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin)) {
-            return callback(null, true);
-        }
-        if (allowedOrigins.includes(origin) || allowedOrigins.includes("*")) {
-            return callback(null, true);
-        }
-        if (process.env.NODE_ENV !== "production") {
-            return callback(null, true);
-        }
-        return callback(new Error(`Origin '${origin}' not allowed by CORS policy.`));
-    },
-    methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-    allowedHeaders: ["Content-Type", "Authorization"],
-    credentials: true
+const corsOptionsDelegate = (req, callback) => {
+    const origin = req.header("Origin");
+
+    // Allow requests with no origin (e.g. mobile apps, curl, server-to-server, Postman)
+    if (!origin) {
+        return callback(null, { origin: true, credentials: true });
+    }
+
+    // 1. Same-origin match: Host matches Origin
+    const host = req.header("Host");
+    if (host && (origin === `https://${host}` || origin === `http://${host}`)) {
+        return callback(null, {
+            origin: true,
+            credentials: true,
+            methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+            allowedHeaders: ["Content-Type", "Authorization", "X-Requested-With", "Accept"],
+            optionsSuccessStatus: 204
+        });
+    }
+
+    // 2. Local development access
+    if (/^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin)) {
+        return callback(null, {
+            origin: true,
+            credentials: true,
+            methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+            allowedHeaders: ["Content-Type", "Authorization", "X-Requested-With", "Accept"],
+            optionsSuccessStatus: 204
+        });
+    }
+
+    // 3. Exact origin match against allowlist
+    if (allowedOrigins.includes(origin)) {
+        return callback(null, {
+            origin: true,
+            credentials: true,
+            methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+            allowedHeaders: ["Content-Type", "Authorization", "X-Requested-With", "Accept"],
+            optionsSuccessStatus: 204
+        });
+    }
+
+    // 4. In development mode only
+    if (process.env.NODE_ENV !== "production") {
+        return callback(null, {
+            origin: true,
+            credentials: true,
+            methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+            allowedHeaders: ["Content-Type", "Authorization", "X-Requested-With", "Accept"],
+            optionsSuccessStatus: 204
+        });
+    }
+
+    // 5. Reject unapproved origins with exact message
+    return callback(new Error(`Origin '${origin}' not allowed by CORS policy.`));
 };
 
-app.use(cors(corsOptions));
+app.use(cors(corsOptionsDelegate));
 
-// 3. Request size protection (10KB limit for JSON bodies)
-app.use(express.json({ limit: "10kb" }));
+// 3. Request size protection (5MB limit for JSON bodies with attachments)
+app.use(express.json({ limit: "5mb" }));
 
 // 4. Handle JSON parse errors, payload too large, and CORS rejections
 app.use((err, req, res, next) => {
     if (err.type === "entity.too.large" || err.status === 413) {
         return res.status(413).json({
             success: false,
-            message: "Payload too large. Request body exceeds the maximum allowed limit of 10KB."
+            message: "Payload too large. Request body exceeds the maximum allowed limit of 5MB."
         });
     }
 
