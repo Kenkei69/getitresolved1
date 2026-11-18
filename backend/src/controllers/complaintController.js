@@ -1,4 +1,11 @@
-const supabase = require("../config/supabase");
+const rawSupabase = require("../config/supabase");
+const supabase = (rawSupabase && typeof rawSupabase.from === "function")
+    ? rawSupabase
+    : (rawSupabase && rawSupabase.default && typeof rawSupabase.default.from === "function")
+        ? rawSupabase.default
+        : (rawSupabase && rawSupabase.supabase)
+            ? rawSupabase.supabase
+            : rawSupabase;
 
 // Helper regex to validate tracking ID format (e.g., JS-2026-1234)
 const TRACKING_ID_REGEX = /^JS-2026-\d{4}$/i;

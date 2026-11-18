@@ -3,7 +3,14 @@ const fs = require("fs");
 require("dotenv").config({ path: path.resolve(__dirname, ".env") });
 require("dotenv").config({ path: path.resolve(__dirname, "../.env") });
 
-const supabase = require("./src/config/supabase");
+const rawSupabase = require("./src/config/supabase");
+const supabase = (rawSupabase && typeof rawSupabase.from === "function")
+    ? rawSupabase
+    : (rawSupabase && rawSupabase.default && typeof rawSupabase.default.from === "function")
+        ? rawSupabase.default
+        : (rawSupabase && rawSupabase.supabase)
+            ? rawSupabase.supabase
+            : rawSupabase;
 const express = require("express");
 const cors = require("cors");
 const helmet = require("helmet");
