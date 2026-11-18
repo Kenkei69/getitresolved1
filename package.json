@@ -11,6 +11,8 @@
     "frontend:dev": "vite",
     "dev": "concurrently -k -p \"[{name}]\" -n \"backend,frontend\" -c \"yellow.bold,cyan.bold\" \"npm run server\" \"vite\"",
     "build": "tsc -b && vite build",
+    "test": "node --test backend/tests/api.test.js",
+    "test:backend": "node --test backend/tests/api.test.js",
     "lint": "eslint .",
     "preview": "vite preview"
   },
