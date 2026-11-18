@@ -1,15 +1,20 @@
-require("dotenv").config();
+const path = require("path");
+const fs = require("fs");
+require("dotenv").config({ path: path.resolve(__dirname, ".env") });
+require("dotenv").config({ path: path.resolve(__dirname, "../.env") });
+
 const supabase = require("./src/config/supabase");
 const express = require("express");
 const cors = require("cors");
 const helmet = require("helmet");
 const complaintRoutes = require("./src/routes/complaintRoutes");
+const { submitFeedback } = require("./src/controllers/complaintController");
 const { generalLimiter } = require("./src/middlewares/rateLimiter");
 
 const app = express();
 
 // Trust reverse proxy in production environments
-if (process.env.NODE_ENV === "production") {
+if (process.env.NODE_ENV === "production" || process.env.REPL_ID) {
     app.set("trust proxy", 1);
 }
 
@@ -19,10 +24,14 @@ app.use(helmet({
     crossOriginEmbedderPolicy: false
 }));
 
-// 2. CORS configuration with explicit allowlist
+// 2. CORS configuration with explicit allowlist and dev flexibility
 const defaultAllowedOrigins = [
     "http://localhost:5173",
-    "http://127.0.0.1:5173"
+    "http://127.0.0.1:5173",
+    "http://localhost:5000",
+    "http://127.0.0.1:5000",
+    "http://localhost:3000",
+    "http://127.0.0.1:3000"
 ];
 
 const envAllowedOrigins = process.env.ALLOWED_ORIGINS
@@ -35,7 +44,14 @@ const corsOptions = {
     origin: (origin, callback) => {
         // Allow requests with no origin (e.g. mobile apps, curl, server-to-server, Postman)
         if (!origin) return callback(null, true);
-        if (allowedOrigins.includes(origin)) {
+        // Allow any localhost / 127.0.0.1 origin during development or testing
+        if (/^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin)) {
+            return callback(null, true);
+        }
+        if (allowedOrigins.includes(origin) || allowedOrigins.includes("*")) {
+            return callback(null, true);
+        }
+        if (process.env.NODE_ENV !== "production") {
             return callback(null, true);
         }
         return callback(new Error(`Origin '${origin}' not allowed by CORS policy.`));
@@ -81,6 +97,7 @@ app.use("/api", generalLimiter);
 
 // Routes
 app.use("/api/complaints", complaintRoutes);
+app.post("/api/feedback", submitFeedback);
 
 // Test API - Health check
 app.get("/api/health", (req, res) => {
@@ -117,6 +134,24 @@ app.get("/api/test-db", async (req, res) => {
     }
 });
 
+// Serve frontend static build files (production / unified mode)
+const distPath = path.resolve(__dirname, "../dist");
+if (fs.existsSync(distPath)) {
+    app.use(express.static(distPath));
+}
+
+// Client-side SPA routing fallback for non-API GET/HEAD requests
+app.use((req, res, next) => {
+    if ((req.method !== "GET" && req.method !== "HEAD") || req.path.startsWith("/api")) {
+        return next();
+    }
+    const indexPath = path.join(distPath, "index.html");
+    if (fs.existsSync(indexPath)) {
+        return res.sendFile(indexPath);
+    }
+    next();
+});
+
 // 404 handler for undefined routes
 app.use((req, res) => {
     res.status(404).json({
@@ -135,8 +170,10 @@ app.use((err, req, res, next) => {
 });
 
 // Server
-const PORT = process.env.PORT || 5000;
+const PORT = parseInt(process.env.PORT || "5000", 10);
 
-app.listen(PORT, () => {
-    console.log(`Server running on http://localhost:${PORT}`);
+const server = app.listen(PORT, "0.0.0.0", () => {
+    console.log(`GetItResolved Backend running on http://localhost:${PORT}`);
 });
+
+module.exports = { app, server };

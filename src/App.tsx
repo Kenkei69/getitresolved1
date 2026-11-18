@@ -47,7 +47,7 @@ interface BackendComplaint {
   updated_at?: string;
 }
 
-const API_BASE_URL = 'http://localhost:5000/api';
+const API_BASE_URL = (import.meta.env.VITE_API_URL || '/api').replace(/\/+$/, '');
 
 const evaluateAiMetrics = (title: string, desc: string, deptInput?: string) => {
   const text = `${title} ${desc}`.toLowerCase();
@@ -562,26 +562,126 @@ export default function App() {
     }
   };
 
+  // Upvoting State (persisted in localStorage)
+  const [upvotedIds, setUpvotedIds] = useState<Record<string, boolean>>(() => {
+    try {
+      const saved = localStorage.getItem('getitresolved_upvoted');
+      return saved ? JSON.parse(saved) : {};
+    } catch {
+      return {};
+    }
+  });
+  const [upvotingIds, setUpvotingIds] = useState<Record<string, boolean>>({});
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('getitresolved_upvoted', JSON.stringify(upvotedIds));
+    } catch (err) {
+      console.error('Failed to save upvotes to localStorage', err);
+    }
+  }, [upvotedIds]);
+
+  const handleUpvote = async (grievanceId: string, e?: React.MouseEvent) => {
+    if (e) {
+      e.preventDefault();
+      e.stopPropagation();
+    }
+    if (upvotedIds[grievanceId] || upvotingIds[grievanceId]) return;
+
+    setUpvotingIds((prev) => ({ ...prev, [grievanceId]: true }));
+
+    // Optimistic UI update
+    setGrievances((prev) =>
+      prev.map((g) => (g.id === grievanceId ? { ...g, upvotes: g.upvotes + 1 } : g))
+    );
+    if (selectedGrievance && selectedGrievance.id === grievanceId) {
+      setSelectedGrievance((prev) => (prev ? { ...prev, upvotes: prev.upvotes + 1 } : null));
+    }
+    setUpvotedIds((prev) => ({ ...prev, [grievanceId]: true }));
+
+    try {
+      const res = await fetch(`${API_BASE_URL}/complaints/${encodeURIComponent(grievanceId)}/upvote`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+      });
+      if (!res.ok) {
+        throw new Error(`Upvote failed with HTTP ${res.status}`);
+      }
+      const data = await res.json();
+      if (data.success && typeof data.upvotes === 'number') {
+        setGrievances((prev) =>
+          prev.map((g) => (g.id === grievanceId ? { ...g, upvotes: data.upvotes } : g))
+        );
+        if (selectedGrievance && selectedGrievance.id === grievanceId) {
+          setSelectedGrievance((prev) => (prev ? { ...prev, upvotes: data.upvotes } : null));
+        }
+      }
+    } catch (err) {
+      console.error('Failed to register upvote on backend:', err);
+      // Rollback optimistic update
+      setGrievances((prev) =>
+        prev.map((g) => (g.id === grievanceId ? { ...g, upvotes: Math.max(0, g.upvotes - 1) } : g))
+      );
+      if (selectedGrievance && selectedGrievance.id === grievanceId) {
+        setSelectedGrievance((prev) => (prev ? { ...prev, upvotes: Math.max(0, prev.upvotes - 1) } : null));
+      }
+      setUpvotedIds((prev) => {
+        const copy = { ...prev };
+        delete copy[grievanceId];
+        return copy;
+      });
+    } finally {
+      setUpvotingIds((prev) => {
+        const copy = { ...prev };
+        delete copy[grievanceId];
+        return copy;
+      });
+    }
+  };
+
   // Help & Support Feedback Form State
   const [fbName, setFbName] = useState('');
   const [fbContact, setFbContact] = useState('');
   const [fbType, setFbType] = useState('bug');
   const [fbMessage, setFbMessage] = useState('');
-  const [fbStatus, setFbStatus] = useState<'idle' | 'success' | 'error'>('idle');
+  const [fbStatus, setFbStatus] = useState<'idle' | 'submitting' | 'success' | 'error'>('idle');
   const [fbErrorMsg, setFbErrorMsg] = useState('');
 
-  const handleFeedbackSubmit = (e: React.FormEvent) => {
+  const handleFeedbackSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setFbErrorMsg('');
-    if (!fbContact.trim() || !fbMessage.trim() || fbMessage.trim().length < 10) {
+    if (!fbContact.trim() || !fbMessage.trim() || fbMessage.trim().length < 5) {
       setFbStatus('error');
       setFbErrorMsg(t.fbErrRequired);
       return;
     }
-    setFbStatus('success');
-    setFbName('');
-    setFbContact('');
-    setFbMessage('');
+    setFbStatus('submitting');
+    try {
+      const res = await fetch(`${API_BASE_URL}/feedback`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: fbName.trim(),
+          contact: fbContact.trim(),
+          type: fbType,
+          message: fbMessage.trim(),
+        }),
+      });
+
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data.success) {
+        throw new Error(data.message || 'Failed to submit feedback');
+      }
+
+      setFbStatus('success');
+      setFbName('');
+      setFbContact('');
+      setFbMessage('');
+    } catch (err) {
+      console.error('Error submitting feedback to backend:', err);
+      setFbStatus('error');
+      setFbErrorMsg(err instanceof Error ? err.message : 'Failed to connect to backend server');
+    }
   };
 
   // Filter Grievances by active star grades
@@ -1744,9 +1844,23 @@ export default function App() {
                                   {item.category}
                                 </span>
                               )}
-                              <span className="flex items-center gap-1 font-bold text-[#124699] dark:text-[#7bb1ff]">
-                                <ThumbsUp size={12} /> {item.upvotes} {t.cardCitizensAffected}
-                              </span>
+                              <button
+                                type="button"
+                                onClick={(e) => handleUpvote(item.id, e)}
+                                disabled={upvotedIds[item.id] || upvotingIds[item.id]}
+                                aria-label={`Upvote issue ${item.id}. Currently ${item.upvotes} upvotes`}
+                                className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                                  upvotedIds[item.id]
+                                    ? 'bg-[#124699] text-white shadow-xs'
+                                    : 'bg-[#f0f5ff] dark:bg-[#162a4a] text-[#124699] dark:text-[#7bb1ff] hover:bg-[#dceaff] dark:hover:bg-[#1f3b68]'
+                                }`}
+                              >
+                                <ThumbsUp size={13} className={upvotedIds[item.id] ? 'fill-current' : ''} />
+                                <span>{item.upvotes}</span>
+                                <span className="hidden sm:inline">
+                                  {upvotedIds[item.id] ? (lang === 'HI' ? 'समर्थित' : 'Upvoted') : t.cardCitizensAffected}
+                                </span>
+                              </button>
                             </div>
                           </div>
 
@@ -2113,6 +2227,44 @@ export default function App() {
               <p className="text-xs text-[#374b6b] dark:text-[#9db3d4] leading-relaxed">
                 {selectedGrievance.description}
               </p>
+
+              <div className="flex flex-wrap items-center justify-between gap-3 pt-3 border-t border-[#edf2fa] dark:border-[#192f52]">
+                <div className="flex items-center gap-2">
+                  <span
+                    className={`px-2.5 py-1 rounded-full text-xs font-bold ${
+                      selectedGrievance.status === 'Resolved'
+                        ? 'bg-[#dcfce7] dark:bg-[#0e3b1f] text-[#15803d] dark:text-[#4ade80]'
+                        : selectedGrievance.status === 'In Progress'
+                        ? 'bg-[#fef3c7] dark:bg-[#453106] text-[#b45309] dark:text-[#f8be43]'
+                        : 'bg-[#e0f2fe] dark:bg-[#0c3757] text-[#0369a1] dark:text-[#67c4fa]'
+                    }`}
+                  >
+                    {selectedGrievance.status}
+                  </span>
+                  <span className="text-xs font-medium text-[#5a6f8e] dark:text-[#8ea2c4]">
+                    {selectedGrievance.createdAt}
+                  </span>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => handleUpvote(selectedGrievance.id)}
+                  disabled={upvotedIds[selectedGrievance.id] || upvotingIds[selectedGrievance.id]}
+                  className={`inline-flex items-center gap-2 px-3.5 py-1.5 rounded-xl text-xs font-bold transition cursor-pointer ${
+                    upvotedIds[selectedGrievance.id]
+                      ? 'bg-[#124699] text-white shadow-xs'
+                      : 'bg-[#f0f5ff] dark:bg-[#162a4a] text-[#124699] dark:text-[#7bb1ff] hover:bg-[#dceaff]'
+                  }`}
+                >
+                  <ThumbsUp size={14} className={upvotedIds[selectedGrievance.id] ? 'fill-current' : ''} />
+                  <span>{selectedGrievance.upvotes}</span>
+                  <span>
+                    {upvotedIds[selectedGrievance.id]
+                      ? (lang === 'HI' ? 'समर्थित' : 'Upvoted')
+                      : (lang === 'HI' ? 'नागरिक समर्थन दें' : 'Upvote Issue')}
+                  </span>
+                </button>
+              </div>
             </motion.div>
           </motion.div>
         )}

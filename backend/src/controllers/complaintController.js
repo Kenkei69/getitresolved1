@@ -271,13 +271,17 @@ const getComplaintByTrackingId = async (req, res) => {
             });
         }
 
-        const normalizedTrackingId = trackingId.trim().toUpperCase();
+        const normalizedTrackingId = trackingId.trim();
+        const isTracking = TRACKING_ID_REGEX.test(normalizedTrackingId);
 
-        const { data, error } = await supabase
-            .from("complaints")
-            .select("*")
-            .eq("tracking_id", normalizedTrackingId)
-            .single();
+        let query = supabase.from("complaints").select("*");
+        if (isTracking) {
+            query = query.eq("tracking_id", normalizedTrackingId.toUpperCase());
+        } else {
+            query = query.eq("id", normalizedTrackingId);
+        }
+
+        const { data, error } = await query.single();
 
         if (error) {
             // PostgREST code PGRST116 means 0 rows matched .single()
@@ -314,10 +318,171 @@ const getComplaintByTrackingId = async (req, res) => {
     }
 };
 
+// Increment upvotes on a complaint
+const upvoteComplaint = async (req, res) => {
+    try {
+        const { trackingId } = req.params;
+        const identifier = (trackingId || req.params.id || "").trim();
+
+        if (!identifier) {
+            return res.status(400).json({
+                success: false,
+                message: "Complaint identifier (tracking ID or ID) is required."
+            });
+        }
+
+        const isTracking = TRACKING_ID_REGEX.test(identifier);
+        let query = supabase.from("complaints").select("id, tracking_id, upvotes");
+        if (isTracking) {
+            query = query.eq("tracking_id", identifier.toUpperCase());
+        } else {
+            query = query.eq("id", identifier);
+        }
+
+        const { data: existing, error: findError } = await query.single();
+        if (findError || !existing) {
+            return res.status(404).json({
+                success: false,
+                message: `Complaint '${identifier}' not found.`
+            });
+        }
+
+        const currentUpvotes = Number(existing.upvotes) || 0;
+        const nextUpvotes = currentUpvotes + 1;
+
+        const { data: updated, error: updateError } = await supabase
+            .from("complaints")
+            .update({
+                upvotes: nextUpvotes,
+                updated_at: new Date().toISOString()
+            })
+            .eq("id", existing.id)
+            .select()
+            .single();
+
+        if (updateError || !updated) {
+            return res.status(500).json({
+                success: false,
+                message: "Failed to record upvote in database.",
+                error: updateError?.message
+            });
+        }
+
+        res.status(200).json({
+            success: true,
+            message: "Upvote recorded successfully!",
+            upvotes: updated.upvotes,
+            complaint: updated
+        });
+    } catch (err) {
+        res.status(500).json({
+            success: false,
+            message: "An unexpected error occurred while upvoting.",
+            error: err.message
+        });
+    }
+};
+
+// Update complaint status or details by tracking ID or UUID
+const updateComplaint = async (req, res) => {
+    try {
+        const { trackingId } = req.params;
+        const identifier = (trackingId || req.params.id || "").trim();
+
+        if (!identifier) {
+            return res.status(400).json({
+                success: false,
+                message: "Identifier parameter (tracking ID or ID) is required."
+            });
+        }
+
+        const { status, description, department, category, title } = req.body || {};
+
+        const updatePayload = {
+            updated_at: new Date().toISOString()
+        };
+
+        if (status !== undefined && status !== null) updatePayload.status = String(status).trim();
+        if (description !== undefined && description !== null) updatePayload.description = String(description).trim();
+        if (department !== undefined && department !== null) updatePayload.department = String(department).trim();
+        if (category !== undefined && category !== null) updatePayload.category = String(category).trim();
+        if (title !== undefined && title !== null) updatePayload.title = String(title).trim();
+
+        const isTracking = TRACKING_ID_REGEX.test(identifier);
+        let query = supabase.from("complaints").update(updatePayload);
+
+        if (isTracking) {
+            query = query.eq("tracking_id", identifier.toUpperCase());
+        } else {
+            query = query.eq("id", identifier);
+        }
+
+        const { data, error } = await query.select();
+
+        if (error) {
+            return res.status(500).json({
+                success: false,
+                message: "Failed to update complaint in database.",
+                error: error.message
+            });
+        }
+
+        if (!data || data.length === 0) {
+            return res.status(404).json({
+                success: false,
+                message: `Complaint '${identifier}' not found.`
+            });
+        }
+
+        res.status(200).json({
+            success: true,
+            message: "Complaint updated successfully!",
+            complaint: data[0]
+        });
+    } catch (err) {
+        res.status(500).json({
+            success: false,
+            message: "An unexpected error occurred while updating the complaint.",
+            error: err.message
+        });
+    }
+};
+
+// Citizen feedback submission handler
+const submitFeedback = async (req, res) => {
+    try {
+        const { name, contact, type, message } = req.body || {};
+        if (!contact || !contact.trim() || !message || message.trim().length < 5) {
+            return res.status(400).json({
+                success: false,
+                message: "Contact and a descriptive message (minimum 5 characters) are required."
+            });
+        }
+
+        const feedbackId = `FB-${Date.now().toString(36).toUpperCase()}`;
+        console.log(`[Citizen Feedback] ID: ${feedbackId} | Type: ${type} | Contact: ${contact.trim()} | Name: ${name?.trim() || 'Anonymous'}`);
+
+        res.status(201).json({
+            success: true,
+            message: "Feedback submitted successfully! Thank you for helping us improve.",
+            feedbackId
+        });
+    } catch (err) {
+        res.status(500).json({
+            success: false,
+            message: "An unexpected error occurred while submitting feedback.",
+            error: err.message
+        });
+    }
+};
+
 module.exports = {
     getAllComplaints,
     createComplaint,
-    getComplaintByTrackingId
+    getComplaintByTrackingId,
+    upvoteComplaint,
+    updateComplaint,
+    submitFeedback
 };
 
 

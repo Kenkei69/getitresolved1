@@ -4,9 +4,18 @@ import tailwindcss from '@tailwindcss/vite'
 
 // https://vite.dev/config/
 export default defineConfig({
-  base: '/getitresolved/',
+  base: process.env.VITE_BASE_PATH || (process.env.GITHUB_ACTIONS ? '/getitresolved/' : '/'),
   plugins: [
     react(),
     tailwindcss(),
   ],
+  server: {
+    port: 5173,
+    proxy: {
+      '/api': {
+        target: 'http://localhost:5000',
+        changeOrigin: true,
+      },
+    },
+  },
 })
